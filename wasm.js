@@ -93,15 +93,20 @@ export function wasmInstance(path, initial_pages=2) {
             const page_size = 1 << 16;
             const pages = Math.floor(size / page_size + 1);
             console.log(`grow memory with ${pages} 16KiB pages`);
+            const memory = imports.env.memory;
             try {
-                imports.env.memory.grow(pages);
+                memory.grow(pages);
             } // try
             catch(error) {
                 console.warn("out of memory");
                 console.groupEnd();
                 return null;
             } // catch
-            console.log(`total memory: ${imports.env.memory.buffer.byteLength / (1024 * 1024)} MiB`);
+            const buffer = memory.buffer;
+            const buffer_size = buffer.byteLength;
+            memory.words = new Uint32Array(buffer, 0, buffer_size / env.word_size);
+            memory.bytes = new Uint8Array(buffer, 0, buffer_size);
+            console.log(`total memory: ${memory.buffer.byteLength / (1024 * 1024)} MiB`);
             const heap_block = heap_blocks[heap_blocks.length - 1];
             heap_blocks.push({
                 address: heap_block.address + heap_block.size,
@@ -116,6 +121,9 @@ export function wasmInstance(path, initial_pages=2) {
 
     return WebAssembly.instantiateStreaming(fetch(path), imports).then(obj => {
         const env = imports.env;
+        const memory = env.memory;
+        const buffer = memory.buffer;
+        const buffer_size = buffer.byteLength;
         const exports = obj.instance.exports;
         const word_size = env.word_size = exports.__word_size();
         const heap_base = exports.__heap_base;
@@ -123,9 +131,11 @@ export function wasmInstance(path, initial_pages=2) {
         console.assert(heap_base % word_size === 0);
         heap_blocks = [{
             address: heap_base.value,
-            size: env.memory.buffer.byteLength - heap_base,
+            size: buffer_size - heap_base,
             free: true,
         }];
+        memory.words = new Uint32Array(buffer, 0, buffer_size / word_size);
+        memory.bytes = new Uint8Array(buffer, 0, buffer_size);
         return {
             env: env,
             exports: exports,
